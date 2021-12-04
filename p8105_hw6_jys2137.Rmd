@@ -7,12 +7,15 @@ output: github_document
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(viridis)
+library(modelr)
+library(p8105.datasets)
 
 knitr::opts_chunk$set(
 	echo = TRUE,
 	warning = FALSE,
 	fig.width = 8, 
   fig.height = 6,
+	dpi = 300,
   out.width = "90%"
 )
 
@@ -26,3 +29,164 @@ scale_fill_discrete = scale_fill_viridis_d
 
 theme_set(theme_minimal() + theme(legend.position = "bottom"))
 ```
+
+### Problem 1
+
+In this problem, we analyze data gathered to understand the effects of several variables on a child’s birthweight. The `birthweight` dataset consists of roughly 4000 children and includes the following variables:
+
+#### 1.1. Loading and cleaning  the data  
+
+First, we load and clean the data in preparation for regression analysis. We do this by:
+
+- converting _**numeric**_ variables to _**factor**_  (for `babysex`, `frace`, `malform`, and `mrace`)
+- converting **imperial** variable measurements to **metric** for consistency (weight from pounds to grams, height from inches to centimeters).
+- checking for **missing data**
+
+```{r load and clean data}
+birthweight_df = read_csv("data/birthweight.csv") %>% 
+  janitor::clean_names() %>%
+  mutate(
+    babysex = as.factor(babysex),
+    babysex = fct_recode(babysex, "male" = "1", "female" = "2"),
+    frace = as.factor(frace),
+    frace = fct_recode(frace, "white" = "1", "black" = "2", "asian" = "3", 
+                       "puerto rican" = "4", "other" = "8"),
+    mrace = as.factor(mrace),
+    mrace = fct_recode(mrace, "white" = "1", "black" = "2", "asian" = "3", 
+                       "puerto rican" = "4"),
+    malform = as.factor(malform),
+    malform = fct_recode(malform, "absent" = "0", "present" = "1"),
+    delwt_g = delwt * 453.59237,
+    mheight_cm = mheight * 2.54,
+    ppwt_g = ppwt * 453.59237,
+    wtgain_g = wtgain * 453.59237)
+
+sum(is.na(birthweight_df))
+```
+
+Note that in our check for missing data, we can see that there are **no `NA` observations** in the data frame.
+
+
+### Problem 2
+
+For this problem, we explore boostrapping by using weather data from NOAA that involves the `minimum` and `maximum` temperatures for Central Park in 2017.
+
+#### 2.1. Loading the data
+
+The code chunk below loads the weather dataset.
+
+```{r weather_df, cache = TRUE}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+#### 2.2. Bootstrap
+Now, we focus on a simple linear regression and are interested in the distribution of two quantities estimated from these data:
+
+1. $\hat{r}^2$
+2. $\log(\beta_0 * \beta1)$
+
+We will use 5000 bootstrap samples from the `weather_df` data frame. For each sample, we fit a simple linear regression with `tmax` as the response and `tmin` as the predictor.
+
+The chunk below sets the bootstraps up. We use `broom::glance()` for getting $\hat{r}^2$ and `broom::tidy()` for getting $\log(\beta_0 * \beta_1)$ from the fitted regression.
+
+```{r bootstrap setup, warning = FALSE}
+set.seed(123)
+
+boot_strap =
+  weather_df %>% 
+  modelr::bootstrap(n = 5000) %>%
+  mutate(
+    models = map(strap, ~lm(tmax ~ tmin, data = .x)),
+    results = map(models, broom::tidy),
+    glance = map(models, broom::glance)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results, glance) %>% 
+  select(.id, term, estimate, r.squared) %>% 
+  pivot_wider(
+    names_from = term,
+    values_from = estimate) %>% 
+  rename(
+    beta0 = `(Intercept)`,
+    beta1 = tmin) %>% 
+  mutate(log_b0b1 = log(beta0 * beta1)) %>% 
+  select(r.squared, log_b0b1)
+```
+
+##### 2.3. Estimate $\hat{r}^2$
+
+To plot the distribution of the estimates of $\hat{r}^2$, we use the following code chunk. 
+
+```{r boostrap_r_sq}
+boot_strap %>% 
+  ggplot(aes(x = r.squared)) + 
+  geom_density(alpha = 0.2) +
+  stat_function(fun = dnorm,
+                args = with(boot_strap, c(mean = mean(r.squared), sd = sd(r.squared))),
+                color = "red",
+                size = 1.5,
+                alpha = .7) +
+  theme(legend.position = "none") +
+  labs(
+        title = "Distribution of" ~R^2, 
+        subtitle = "Based on 5000 bootstrap samples of a linear model",
+        x = "Estimate",
+        y = "Density")
+```
+
+The estimates for **$\hat{r}^2$** looks to be roughly **normally distributed**. However, it is important to note that the estimate is high, as the values are distributed closer to the upper bound of 1. It could be argued that there is a very slight left-skew in the distribution, but this is likely due to the high estimate of $\hat{r}^2$. This suggests that a vast majority of the variation in `tmax` can be explained by `tmin`.
+
+##### 2.4. Estimate for $\log(\beta_0 * \beta_1)$
+
+Similarly, we plot the distribution of the estimates of $\log(\beta_0 * \beta_1)$, using the code chunk below. Note that we need to do some more data wrangling for this plot.
+
+```{r boostrap_log}
+boot_strap %>% 
+  ggplot(aes(x = log_b0b1)) + 
+  geom_density(alpha = 0.2) +
+  stat_function(fun = dnorm,
+                args = with(boot_strap, c(mean = mean(log_b0b1), sd = sd(log_b0b1))),
+                color = "blue",
+                size = 1.5,
+                alpha = .7) +
+  theme(legend.position = "none") +
+  labs(
+        title = "Distribution of" ~log(hat(beta)[0] %*% hat(beta)[1]),
+        subtitle = "Based on 5000 bootstrap samples of a linear model",
+        x = "Estimate",
+        y = "Density")
+```
+
+Similar to the **$\hat{r}^2$** estimate, the distribution for **$\log(\beta_0 * \beta_1)$** is also roughly **normally distributed**. However, the plot shows that the **peak** of this distribution is not exactly normal as it has a _very small dip_ at the top of the distribution.
+
+#### 2.5. 95% Confidence Intervals
+
+Using the 5000 bootstrap estimates, we can identify the 2.5% and 97.5% quantiles to provide a **95% confidence interval** for **$\hat{r}^2$** and **$\log(\beta_0 * \beta_1)$**.
+
+- The _95% confidence interval_ of **`R-squared`** is (`r round(quantile(pull(boot_strap, r.squared), probs = c(0.025,0.975)), digits = 2)`).
+
+- The _95% confidence interval_ of **`log(beta0 x beta1)`** is (`r round(quantile(pull(boot_strap, log_b0b1), probs = c(0.025,0.975)), digits = 2)`).  
+
+The code chunk below produces a useful table with point estimates and confidence intervals or $\hat{r}^2$ and $\log(\beta_0 * \beta_1)$.
+
+```{r estimate_ci_table}
+# Get estimate and confidence interval for each term
+tibble(term = c("R-Squared", "Log Product"),
+       Estimate = c(mean(pull(boot_strap, r.squared)),
+                    mean(pull(boot_strap, log_b0b1))),
+       "Lower CI" = c(quantile(pull(boot_strap, r.squared), 0.025),
+                    quantile(pull(boot_strap, log_b0b1), 0.025)),
+       "Upper CI" = c(quantile(pull(boot_strap, r.squared), 0.975),
+                    quantile(pull(boot_strap, log_b0b1), 0.975))) %>%
+  knitr::kable()
+```
+
