@@ -36,11 +36,11 @@ In this problem, we analyze data gathered to understand the effects of several v
 
 #### 1.1. Loading and cleaning  the data  
 
-First, we load and clean the data in preparation for regression analysis. We do this by:
+First, we **load** and **clean** the data in preparation for regression analysis. We do this by:
 
-- converting _**numeric**_ variables to _**factor**_  (for `babysex`, `frace`, `malform`, and `mrace`)
-- converting **imperial** variable measurements to **metric** for consistency (weight from pounds to grams, height from inches to centimeters).
-- checking for **missing data**
+- converting _numeric_ variables to _factor_  (for `babysex`, `frace`, `malform`, and `mrace`)
+- converting _imperial_ variable measurements to _metric_ for consistency (weight from pounds to grams, height from inches to centimeters).
+- checking for _missing data_
 
 ```{r load and clean data}
 birthweight_df = read_csv("data/birthweight.csv") %>% 
@@ -65,6 +65,55 @@ sum(is.na(birthweight_df))
 ```
 
 Note that in our check for missing data, we can see that there are **no `NA` observations** in the data frame.
+
+#### 1.2. Proposing a regression model  
+
+`Now`, we develop a regression model for birthweight. The proposed regression model for birthweight is based on a hypothesized structure for the factors that underly birthweight (`bwt`):
+
+  * `babysex`: baby’s sex - birthweight could be greater in male vs female;
+  * `bhead`: baby’s head circumference at birth (cm); 
+  * `blength`: baby’s length at birth (cm) - birthweight could increase with length;
+  * `gaweeks`: gestational age in weeks - birthweight could increase with age;
+  * `malform`: presence of malformations that could affect weight;
+  * `momage`: mother's age at delivery (years) - birthweight could decrease with increasing maternal age;
+  * `parity`: number of live births prior to this pregnancy - birthweight could decrease with increasing number
+  * `smoken`: average number of cigarettes smoked per day during pregnancy 
+  * `wtgain`: mother's weight gain during pregnancy (kg) - birthweight could increase with increasing maternal weight gain 
+
+```{r regression model}
+hypoth_model = 
+  lm(bwt ~ babysex + bhead + blength + gaweeks + parity + smoken, data = birthweight_df)
+
+hypoth_model %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+The code chunk below shows creates a plot of model residuals against fitted values, using `add_predictions` and `add_residuals`.
+
+```{r residual_fitted_ plot}
+birthweight_df %>%
+  add_residuals(hypoth_model) %>%
+  add_predictions(hypoth_model) %>%
+  ggplot(aes(x = pred, 
+             y = resid)) + 
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  geom_hline(yintercept = 0, color = "red", size = 1, linetype = 2) +
+  labs(
+    title = "Model Residuals Against Fitted Values",
+    x = "Fitted Values",
+    y = "Residuals")
+```
+
+```{r birthweight models}
+hyp_mod = lm(bwt ~ gaweeks + malform + momage + wtgain, data = birthweight_df)
+main_fx_mod = lm(bwt ~ blength + gaweeks, data = birthweight_df)
+interact_mod = lm(bwt ~ bhead + blength + babysex + (bhead * blength) + (bhead * babysex) + (bhead * blength * babysex), data = birthweight_df)
+hyp_mod %>% broom::tidy()
+```
+
+As shown in the plot of model residuals against fitted values, most residuals are dispersed rather evenly around 0. This cluster indicates a model that is **well-fit**. However, it is important to note that there are a few large differences in the plot. For example, some birthweight fitted values between 500-2000g have a residual greater than 1000g. In addition, the plot illustrates more positive residual values on the lower range of the fitted prediction values, while more negative residuals values are on the higher range of the fitted prediction values. From these observations, we can conclude that the model is **reasonable**, but _not necessarily “optimal”_ (as expected for this problem).
 
 
 ### Problem 2
@@ -122,7 +171,7 @@ boot_strap =
   select(r.squared, log_b0b1)
 ```
 
-##### 2.3. Estimate $\hat{r}^2$
+#### 2.3. Estimate $\hat{r}^2$
 
 To plot the distribution of the estimates of $\hat{r}^2$, we use the following code chunk. 
 
@@ -145,7 +194,7 @@ boot_strap %>%
 
 The estimates for **$\hat{r}^2$** looks to be roughly **normally distributed**. However, it is important to note that the estimate is high, as the values are distributed closer to the upper bound of 1. It could be argued that there is a very slight left-skew in the distribution, but this is likely due to the high estimate of $\hat{r}^2$. This suggests that a vast majority of the variation in `tmax` can be explained by `tmin`.
 
-##### 2.4. Estimate for $\log(\beta_0 * \beta_1)$
+#### 2.4. Estimate for $\log(\beta_0 * \beta_1)$
 
 Similarly, we plot the distribution of the estimates of $\log(\beta_0 * \beta_1)$, using the code chunk below. Note that we need to do some more data wrangling for this plot.
 
@@ -189,4 +238,3 @@ tibble(term = c("R-Squared", "Log Product"),
                     quantile(pull(boot_strap, log_b0b1), 0.975))) %>%
   knitr::kable()
 ```
-
